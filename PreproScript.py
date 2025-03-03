@@ -1,10 +1,12 @@
 import typer
-import pandas as pandas
+import pandas as pd
 import re
 import numpy as np
 import pycountry
 from dateutil import parser
 from functools import lru_cache
+from datetime import datetime
+import time
 
 app = typer.Typer()
 
@@ -81,6 +83,13 @@ def identifikasi_kolom_date(df):
             kolom_id.append(kolom)
     return kolom_id
 
+# Format Tanggal
+def safe_parse(tanggal):
+    try:
+        return parser.parse(tanggal)
+    except (ValueError, TypeError): 
+        return pd.NaT
+
 # Mencari Kolom Country
 def apakah_kolom_country(kolom):
     pattern = r'(origin|citizenship|country|nationality)\b|_(origin|citizenship|country|nationality)[_A-Z]?'
@@ -114,6 +123,12 @@ def identifikasi_kolom_telp(df, threshold = 0.7):
     return kolom_id
 
 # Format Nama Negara
+special_mapping = {
+    'america': 'USA',
+    'bharat': 'IND',
+    'uk' : 'United Kingdom'
+}
+
 @lru_cache(maxsize=None)
 def format_country(country):
     """
@@ -138,12 +153,16 @@ def ekstrak_simbol(baris):
                 simbol.add(x)
     return re.escape(''.join(simbol))
 
-def format_nomor(nomor, simbol):
+def format_nomor(nomor, simbol, pemisah="-"):
     """
     Format Nomor untuk menghilangkan simbol yang tidak perlu
     """
     clean_text = re.sub(f'[{simbol}]', '', nomor)
-    return clean_text
+    chunk = []
+    for i in range(0, len(clean_text), 3):
+        chunk.append(clean_text[i:i+3])
+    hasil = pemisah.join(chunk)
+    return hasil
     
 @app.command()
 def clean(input_file: str):
@@ -165,7 +184,18 @@ def clean(input_file: str):
         # 4. Format Tanggal
         kolom_date = identifikasi_kolom_date(df)
         for kolom in kolom_date:
-            df[kolom] = df[kolom].apply(parser.parse)
+            df[kolom] = df[kolom].apply(safe_parse)
+            if df[kolom].isna().sum() > 0:
+                print(f'Terdapat value NaT setelah parsing')
+                time.sleep(0.2)
+                user_response = input("Apakah anda mau menghapus baris dengan value NaT? (Y/N)").strip().upper()
+                if user_response == "Y":
+                    df[kolom] = df.dropna(subset=[kolom], inplace=True)
+                    print("Baris dengan nilai NaT berhasil terhapus!")
+                elif user_response == "N":
+                    print("Baris dengan nilai NaT dipertahankan")
+                else:
+                    print("Input Salah, baris dengan nilai NaT dipertahankan")
 
         # 5. Format Nama Negara
         kolom_negara = identifikasi_kolom_country(df)
@@ -178,6 +208,12 @@ def clean(input_file: str):
             simbol = ekstrak_simbol(df[kolom])
             df[kolom] = df[kolom].apply(lambda x: format_nomor(x, simbol))
 
+        # Output File
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_filename = f"{timestamp}.csv"
+        df.to_csv(new_filename, index=False)
+
+        print(f"Saved as {new_filename}")
     except Exception as e:
         typer.secho(f"Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
