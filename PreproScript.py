@@ -55,6 +55,29 @@ def format_nama(nama):
     """
     return nama.title()
 
+# Mencari Kolom Tanggal
+def apakah_kolom_date(kolom):
+    """
+    Apakah Kolom Tanggal?
+    Pola kata dari kolom yang ingin dihapus
+    Mencari kolom dengan pola kata "date" dll
+    """
+    pattern1 = r'(date|tanggal|tgl|dt)\b|_(date|tanggal|tgl|dt)[_A-Z]?'
+    verif1 = re.search(pattern1, kolom, re.IGNORECASE)
+    # verif2 = re.search(pattern2, kolom, re.IGNORECASE)
+    return verif1
+    # return re.search(pattern, kolom, re.IGNORECASE)
+
+def identifikasi_kolom_date(df):
+    """
+    Identifikasi Kolom ID
+    """
+    kolom_id = []
+    for kolom in df.columns:
+        if apakah_kolom_date(kolom):
+            kolom_id.append(kolom)
+    return kolom_id
+    
 @app.command()
 def clean(input_file: str):
     try:
