@@ -1,6 +1,7 @@
 import typer
 import pandas as pandas
 import re
+from dateutil import parser
 
 app = typer.Typer()
 
@@ -70,8 +71,11 @@ def clean(input_file: str):
         kolom_nama = identifikasi_kolom_nama(df)
         for kolom in kolom_nama:
             df[kolom] = df[kolom].apply(format_nama)
-        # 3. Imputasi
-
+        
+        # 4. Format Tanggal
+        kolom_date = identifikasi_kolom_date(df)
+        for kolom in kolom_date:
+            df[kolom] = df[kolom].apply(parser.parse)
 
     except Exception as e:
         typer.secho(f"Error: {str(e)}", fg=typer.colors.RED)
