@@ -164,6 +164,30 @@ def format_nomor(nomor, simbol, pemisah="-"):
     hasil = pemisah.join(chunk)
     return hasil
     
+# Mencari Kolom Product
+def apakah_kolom_product(kolom):
+    pattern = r'\b(product|category|produk|kategori)|(product|category|produk|kategori)\b|_(product|category|produk|kategori)[_A-Z]?'
+    return re.search(pattern, kolom, re.IGNORECASE)
+
+def identifikasi_kolom_product(df):
+    kolom_id = []
+    for kolom in df.columns:
+        ratio = df[kolom].nunique() / len(df)
+        if apakah_kolom_product(kolom):
+            kolom_id.append(kolom)
+    return kolom_id
+
+typo_mapping = {
+    'electornics': 'electronics',
+}
+def format_product(produk):
+    produk = str(produk).lower()
+    if produk in ['na','nan']:
+        produk = 'Unknown'
+    if produk in typo_mapping:
+        produk = typo_mapping[produk]
+    return produk.title()
+
 @app.command()
 def clean(input_file: str):
     try:
@@ -208,6 +232,11 @@ def clean(input_file: str):
             simbol = ekstrak_simbol(df[kolom])
             df[kolom] = df[kolom].apply(lambda x: format_nomor(x, simbol))
 
+        # 7. Format Product
+        kolom_product = identifikasi_kolom_product(df)
+        for kolom in kolom_product:
+            df[kolom] = df[kolom].apply(format_product)
+            
         # Output File
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_filename = f"{timestamp}.csv"
