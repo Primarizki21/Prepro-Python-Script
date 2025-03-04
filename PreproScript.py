@@ -7,6 +7,7 @@ from dateutil import parser
 from functools import lru_cache
 from datetime import datetime
 import time
+import os
 
 app = typer.Typer()
 
@@ -181,6 +182,8 @@ def identifikasi_kolom_product(df):
 typo_mapping = {
     'electornics': 'electronics',
 }
+
+# Format Product
 def format_product(produk):
     produk = str(produk).lower()
     if produk in ['na','nan']:
@@ -189,6 +192,56 @@ def format_product(produk):
         produk = typo_mapping[produk]
     return produk.title()
 
+# Format Voting
+def apakah_kolom_voting(kolom):
+    pattern = r'\b(vote|voting)|(vote|voting)\b|_(vote|voting)[_A-Z]?'
+    return re.search(pattern, kolom, re.IGNORECASE)
+
+def identifikasi_kolom_voting(df):
+    kolom_id = []
+    for kolom in df.columns:
+        ratio = df[kolom].nunique() / len(df)
+        if apakah_kolom_voting(kolom):
+            kolom_id.append(kolom)
+    return kolom_id
+
+voting_mapping = {
+    'No': 'No',
+    'N': 'No',
+    'Yes': 'Yes',
+    'Y': 'Yes',
+    ' ': 'Unknown',
+    np.nan: 'Unknown'
+}
+
+# Format Marital
+def apakah_kolom_marital(kolom):
+    pattern = r'\b(marital|marriage|pernikahan|nikah|perkawinan|kawin)|(marital|marriage|pernikahan|nikah|perkawinan|kawin)\b|_(marital|marriage|pernikahan|nikah|perkawinan|kawin)[_A-Z]?'
+    return re.search(pattern, kolom, re.IGNORECASE)
+
+def identifikasi_kolom_marital(df):
+    kolom_id = []
+    for kolom in df.columns:
+        ratio = df[kolom].nunique() / len(df)
+        if apakah_kolom_marital(kolom):
+            kolom_id.append(kolom)
+    return kolom_id
+
+marital_mapping = {
+    's': 'Single',
+    'belum menikah': 'Single',
+    'janda': 'Widowed',
+    'duda' : 'Widowed',
+    'cerai' : 'Divorced',
+}
+
+def format_marital(marital):
+    marital = str(marital).lower()
+    if marital in marital_mapping:
+        marital = marital_mapping[marital]
+    return marital.title()
+
+# Main Function
 @app.command()
 def clean(input_file: str):
     try:
@@ -241,9 +294,19 @@ def clean(input_file: str):
         for kolom in kolom_product:
             df[kolom] = df[kolom].apply(format_product)
 
+        # 8. Format Voting
+        kolom_voting = identifikasi_kolom_voting(df)
+        for kolom in kolom_voting:
+            df[kolom] = df[kolom].replace(voting_mapping)
+        
+        # 9. Format Marital
+        kolom_marital = identifikasi_kolom_marital(df)
+        for kolom in kolom_marital:
+            df[kolom] = df[kolom].apply(format_marital)
+
         # Output File
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        new_filename = f"{timestamp}.csv"
+        nama_file = os.path.basename(input_file)
+        new_filename = f"clean-{nama_file}"
         df.to_csv(new_filename, index=False)
 
         print(f"Saved as {new_filename}")
