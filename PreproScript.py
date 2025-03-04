@@ -84,11 +84,12 @@ def identifikasi_kolom_date(df):
     return kolom_id
 
 # Format Tanggal
-def safe_parse(tanggal):
+def safe_parse(date_str):
+    date_str = str(date_str).strip()
     try:
-        return parser.parse(tanggal)
+        return parser.parse(date_str)
     except (ValueError, TypeError): 
-        return pd.NaT
+        return pd.NaT 
 
 # Mencari Kolom Country
 def apakah_kolom_country(kolom):
@@ -208,18 +209,21 @@ def clean(input_file: str):
         # 4. Format Tanggal
         kolom_date = identifikasi_kolom_date(df)
         for kolom in kolom_date:
-            df[kolom] = df[kolom].apply(safe_parse)
-            if df[kolom].isna().sum() > 0:
-                print(f'Terdapat value NaT setelah parsing')
-                time.sleep(0.2)
-                user_response = input("Apakah anda mau menghapus baris dengan value NaT? (Y/N)").strip().upper()
-                if user_response == "Y":
-                    df[kolom] = df.dropna(subset=[kolom], inplace=True)
-                    print("Baris dengan nilai NaT berhasil terhapus!")
-                elif user_response == "N":
-                    print("Baris dengan nilai NaT dipertahankan")
-                else:
-                    print("Input Salah, baris dengan nilai NaT dipertahankan")
+            if df[kolom].dtype != 'datetime64[ns]':
+                df[kolom] = df[kolom].apply(safe_parse)
+                if df[kolom].isna().sum() > 0:
+                    print(f'Terdapat value NaT setelah parsing')
+                    time.sleep(0.2)
+                    user_response = input("Apakah anda mau menghapus baris dengan value NaT? (Y/N)").strip().upper()
+                    if user_response == "Y":
+                        df.dropna(subset=[kolom], inplace=True)
+                        print("Baris dengan nilai NaT berhasil terhapus!")
+                    elif user_response == "N":
+                        print("Baris dengan nilai NaT dipertahankan")
+                    else:
+                        print("Input Salah, baris dengan nilai NaT dipertahankan")
+            else:
+                print(f"Kolom {kolom} sudah dalam format datetime64[ns]")
 
         # 5. Format Nama Negara
         kolom_negara = identifikasi_kolom_country(df)
@@ -236,7 +240,7 @@ def clean(input_file: str):
         kolom_product = identifikasi_kolom_product(df)
         for kolom in kolom_product:
             df[kolom] = df[kolom].apply(format_product)
-            
+
         # Output File
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         new_filename = f"{timestamp}.csv"
