@@ -70,9 +70,7 @@ def apakah_kolom_date(kolom):
     """
     pattern1 = r'(date|tanggal|tgl|dt)\b|_(date|tanggal|tgl|dt)[_A-Z]?'
     verif1 = re.search(pattern1, kolom, re.IGNORECASE)
-    # verif2 = re.search(pattern2, kolom, re.IGNORECASE)
     return verif1
-    # return re.search(pattern, kolom, re.IGNORECASE)
 
 def identifikasi_kolom_date(df):
     """
@@ -124,24 +122,6 @@ def identifikasi_kolom_telp(df, threshold = 0.7):
             kolom_id.append(kolom)
     return kolom_id
 
-# Format Nama Negara
-special_mapping = {
-    'america': 'USA',
-    'bharat': 'IND',
-    'uk' : 'United Kingdom'
-}
-
-@lru_cache(maxsize=None)
-def format_country(country):
-    """
-    Format country menjadi nama negara, bukan code atau nomor
-    """
-    country = country.lower()
-    if country in special_mapping:
-        country = special_mapping[country]
-    hasil_cari = pycountry.countries.search_fuzzy(country)[0]
-    return hasil_cari.name
-
 # Format Nomor Telepon
 angka = [str(i) for i in range(0,10)]
 def ekstrak_simbol(baris):
@@ -192,54 +172,99 @@ def format_product(produk):
         produk = typo_mapping[produk]
     return produk.title()
 
-# Format Voting
-def apakah_kolom_voting(kolom):
-    pattern = r'\b(vote|voting)|(vote|voting)\b|_(vote|voting)[_A-Z]?'
-    return re.search(pattern, kolom, re.IGNORECASE)
-
-def identifikasi_kolom_voting(df):
-    kolom_id = []
-    for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
-        if apakah_kolom_voting(kolom):
-            kolom_id.append(kolom)
-    return kolom_id
-
+# Kategorik
+country_mapping = {
+    'america': 'USA',
+    'bharat': 'IND',
+    'uk': 'United Kingdom'
+}
 voting_mapping = {
-    'No': 'No',
-    'N': 'No',
-    'Yes': 'Yes',
-    'Y': 'Yes',
+    'n': 'No', 
+    'y': 'Yes',
     ' ': 'Unknown',
+    '': 'Unknown',
     np.nan: 'Unknown'
 }
-
-# Format Marital
-def apakah_kolom_marital(kolom):
-    pattern = r'\b(marital|marriage|pernikahan|nikah|perkawinan|kawin)|(marital|marriage|pernikahan|nikah|perkawinan|kawin)\b|_(marital|marriage|pernikahan|nikah|perkawinan|kawin)[_A-Z]?'
-    return re.search(pattern, kolom, re.IGNORECASE)
-
-def identifikasi_kolom_marital(df):
-    kolom_id = []
-    for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
-        if apakah_kolom_marital(kolom):
-            kolom_id.append(kolom)
-    return kolom_id
-
 marital_mapping = {
     's': 'Single',
-    'belum menikah': 'Single',
+    'belummenikah': 'Single', 
     'janda': 'Widowed',
-    'duda' : 'Widowed',
-    'cerai' : 'Divorced',
+    'duda': 'Widowed',
+    'cerai': 'Divorced'
 }
+education_mapping = {
+    'sma': 'High School',
+    'hs' : 'High School',
+    'phd' : 'Doctorate',
+    's1': 'Bachelors',
+    's2': 'Master',
+    's3': 'Doctorate'
+}
+gender_mapping = {
+    'm': 'Male',
+    'f': 'Female',
+    'u': 'Unknown',
+}
+blood_mapping = {
+    'positive': '+',
+    'negative': '-',
+    'positif': '+',
+    'negatif': '-',
+}
+def merge_dictionaries(*dicts):
+    merged_dict = {}
+    for dictionary in dicts:
+        merged_dict.update(dictionary)
+    return merged_dict
 
-def format_marital(marital):
-    marital = str(marital).lower()
-    if marital in marital_mapping:
-        marital = marital_mapping[marital]
-    return marital.title()
+def apakah_bloodtype(kolom):
+    akhiran = kolom.str.endswith('+') | kolom.str.endswith('-')
+    ada_kata = kolom.str.contains('positive|negative|positif|negatif', case=False, na=False)
+    return akhiran.any() | ada_kata.any()
+
+def format_bloodtype(blood, dictionary):
+    output = blood
+    blood = blood.lower()
+    bagian = blood.split()
+    if len(bagian) == 2 and (bagian[0] in ['a', 'b', 'ab', 'o'] and bagian[1] in dictionary):
+        darah, tipe = bagian
+        tipe = dictionary.get(tipe.lower(), tipe)
+        return f"{darah.upper()}{tipe}"
+    elif len(bagian) == 1 and bagian[0][-1] in ['+', '-']:
+        return bagian[0].upper()
+    else:
+        return output
+
+def replace_values_with_dict(df, dictionary):
+    for kolom in df.select_dtypes(include=['object']).columns:
+        df[kolom] = df[kolom].str.strip().str.lower()
+        df[kolom] = df[kolom].replace(dictionary)
+        if apakah_bloodtype(df[kolom]):
+            df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
+        else:
+            df[kolom] = df[kolom].str.title()
+    return df
+
+merged_dict = merge_dictionaries(
+    country_mapping, 
+    voting_mapping, 
+    marital_mapping,
+    education_mapping,
+    gender_mapping,
+    blood_mapping
+    )
+
+# Format Nama Negara
+@lru_cache(maxsize=None)
+def format_country(country):
+    """
+    Format country menjadi nama negara, bukan code atau nomor
+    """
+    country = country.lower()
+    if country in country_mapping:
+        country = country_mapping[country]
+    hasil_cari = pycountry.countries.search_fuzzy(country)[0]
+    return hasil_cari.name
 
 # Main Function
 @app.command()
@@ -294,15 +319,8 @@ def clean(input_file: str):
         for kolom in kolom_product:
             df[kolom] = df[kolom].apply(format_product)
 
-        # 8. Format Voting
-        kolom_voting = identifikasi_kolom_voting(df)
-        for kolom in kolom_voting:
-            df[kolom] = df[kolom].replace(voting_mapping)
-        
-        # 9. Format Marital
-        kolom_marital = identifikasi_kolom_marital(df)
-        for kolom in kolom_marital:
-            df[kolom] = df[kolom].apply(format_marital)
+        # 8. Format Kategorik
+        df = replace_values_with_dict(df, merged_dict)
 
         # Output File
         nama_file = os.path.basename(input_file)
