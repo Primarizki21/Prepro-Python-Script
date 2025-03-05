@@ -36,34 +36,6 @@ def identifikasi_kolom_id(df, threshold = 0.7):
             kolom_id.append(kolom)
     return kolom_id
 
-# Mencari Kolom Nama
-def apakah_kolom_nama(kolom):
-    """
-    Apakah Kolom Nama?
-    Pola kata dari kolom yang ingin dihapus
-    Mencari kolom dengan pola kata "name" dan "nama"
-    """
-    pattern = r'(name|nama)[_A-Z]?'
-    return re.search(pattern, kolom, re.IGNORECASE)
-
-def identifikasi_kolom_nama(df, threshold = 0.7):
-    """
-    Identifikasi Kolom Nama
-    Menggunakan threshold 0.7 sebagai batas nilai Kardinalitas
-    """
-    kolom_id = []
-    for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
-        if (ratio >= threshold) and apakah_kolom_nama(kolom):
-            kolom_id.append(kolom)
-    return kolom_id
-
-def format_nama(nama):
-    """
-    Format Nama Kapital
-    """
-    return nama.title()
-
 # Mencari Kolom Tanggal
 def apakah_kolom_date(kolom):
     """
@@ -105,51 +77,10 @@ def identifikasi_kolom_country(df):
     """
     kolom_id = []
     for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
         if apakah_kolom_country(kolom):
             kolom_id.append(kolom)
     return kolom_id
 
-# Mencari Kolom Nomor Telepon
-def apakah_kolom_telp(kolom):
-    pattern = r'\b(phone|telp|telephone)|(phone|telp|telephone)\b|_(phone|telp|telephone)[_A-Z]?'
-    return re.search(pattern, kolom, re.IGNORECASE)
-
-def identifikasi_kolom_telp(df, threshold = 0.7):
-    """
-    Identifikasi Kolom Nomor Telepon
-    """
-    kolom_id = []
-    for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
-        if (ratio >= threshold) and apakah_kolom_telp(kolom):
-            kolom_id.append(kolom)
-    return kolom_id
-
-# Format Nomor Telepon
-angka = [str(i) for i in range(0,10)]
-def ekstrak_simbol(baris):
-    """
-    Ekstrak Simbol agar bisa digunakan disemua situasi
-    """
-    simbol = set()
-    for nomor in baris:
-        for x in nomor:
-            if x not in angka and x not in simbol:
-                simbol.add(x)
-    return re.escape(''.join(simbol))
-
-def format_nomor(nomor, simbol, pemisah="-"):
-    """
-    Format Nomor untuk menghilangkan simbol yang tidak perlu
-    """
-    clean_text = re.sub(f'[{simbol}]', '', nomor)
-    chunk = []
-    for i in range(0, len(clean_text), 3):
-        chunk.append(clean_text[i:i+3])
-    hasil = pemisah.join(chunk)
-    return hasil
-    
 # Kategorik
 country_mapping = {
     'america': 'USA',
@@ -157,6 +88,8 @@ country_mapping = {
     'uk': 'United Kingdom'
 }
 voting_mapping = {
+    'no': 'No',
+    'yes': 'Yes',
     'n': 'No', 
     'y': 'Yes',
     ' ': 'Unknown',
@@ -170,6 +103,7 @@ marital_mapping = {
     'cerai': 'Divorced'
 }
 education_mapping = {
+    'high school': 'High School',
     'sma': 'High School',
     'hs' : 'High School',
     'phd' : 'Doctorate',
@@ -233,24 +167,13 @@ def format_bloodtype(blood, dictionary):
 
 # Format Typo
 spell = SpellChecker()
-@lru_cache(maxsize=None)
-def format_typo1(typo):
-    hasil = spell.correction(typo)
-    if hasil is None:
-        return typo.title()
-    return hasil.title()
-
 sym_spell = SymSpell(max_dictionary_edit_distance=4, prefix_length=12)
 dictionary_path = pkg_resources.resource_filename(
     "symspellpy", "frequency_dictionary_en_82_765.txt")
 sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
-def format_typo2(typo):
-    saran_typo = sym_spell.lookup(typo, Verbosity.CLOSEST, max_edit_distance=4)
-    if saran_typo:
-        return saran_typo[0].term.title()
-    # return hasil.title()
 
 cache_kata = {}
+@lru_cache(maxsize=None)
 def combine_format_typo(typo):
     if typo in cache_kata:
         return cache_kata[typo]
@@ -268,13 +191,17 @@ def combine_format_typo(typo):
 
 def replace_values_with_dict(df, dictionary):
     kolom_darah = [col for col in df.columns if apakah_bloodtype(df[col])]
+    kolom_negara = [col for col in df.columns if apakah_kolom_country(col)]
     
     for kolom in df.select_dtypes(include=['object']).columns:
-        df[kolom] = df[kolom].fillna('Unknown')
-        df[kolom] = df[kolom].apply(lambda x: str(x).lower())
-        df[kolom] = df[kolom].replace(dictionary)
-        print(kolom)
-        df[kolom] = df[kolom].apply(lambda x: combine_format_typo(x) if x not in dictionary and kolom not in kolom_darah else x)      
+        df[kolom] = df[kolom].fillna('Unknown').apply(lambda x: str(x).lower())
+        if kolom not in [*kolom_negara, *kolom_darah]:
+            if ~df[kolom].isin(dictionary).any():
+                print(f"Processing {kolom} as typo")
+                df[kolom] = df[kolom].apply(combine_format_typo)
+            else:      
+                print(f"Processing {kolom} with dictionary")
+                df[kolom] = df[kolom].apply(lambda x: dictionary.get(x, x))
         if kolom in kolom_darah:
             df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
         else:
@@ -292,6 +219,7 @@ merged_dict = merge_dictionaries(
     )
 
 # Format Nama Negara
+@lru_cache(maxsize=None)
 def format_country(country):
     """
     Format country menjadi nama negara, bukan code atau nomor
@@ -312,7 +240,7 @@ def format_kolom_hapus(df, threshold = 0.6):
             kolom_id.append(kolom)
     return kolom_id
 
-def format_kolom_hapus_int(df):
+def format_kolom_int(df):
     kolom_id = []
     for kolom in df.select_dtypes(include=['int', 'float']).columns:
         kolom_id.append(kolom)
@@ -324,14 +252,14 @@ def clean(input_file: str):
     try:
         df = pd.read_csv(input_file)
 
-        # # 1. Menghapus Kolom ID
-        # kolom_id = identifikasi_kolom_id(df)
-        # df = df.drop(columns = kolom_id)
+        # 1. Menghapus Kolom ID
+        kolom_id = identifikasi_kolom_id(df)
+        df = df.drop(columns = kolom_id)
 
         # 2. Menghilangkan Duplikasi
         df = df.drop_duplicates()
         
-        # 4. Format Tanggal
+        # 3. Format Tanggal
         kolom_date = identifikasi_kolom_date(df)
         for kolom in kolom_date:
             if df[kolom].dtype != 'datetime64[ns]':
@@ -339,32 +267,28 @@ def clean(input_file: str):
                 if df[kolom].isna().sum() > 0:
                     print(f'Terdapat value NaT setelah parsing')
                     time.sleep(0.2)
-                    user_response = input("Apakah anda mau menghapus baris dengan value NaT? (Y/N)").strip().upper()
-                    if user_response == "Y":
-                        df.dropna(subset=[kolom], inplace=True)
-                        print("Baris dengan nilai NaT berhasil terhapus!")
-                    elif user_response == "N":
-                        print("Baris dengan nilai NaT dipertahankan")
-                    else:
-                        print("Input Salah, baris dengan nilai NaT dipertahankan")
+                    print('Menghapus baris dengan value NaT')
+                    df.dropna(subset=[kolom], inplace=True)
             else:
                 print(f"Kolom {kolom} sudah dalam format datetime64[ns]")
 
-        # kolom hapus
+        # Kolom yang akan dihapus
         kolom_hapus = format_kolom_hapus(df)
+        print(f'Ini adalah kolom yang akan dihapus: {kolom_hapus}')
         df = df.drop(columns = kolom_hapus)
 
-        # int
-        kolom_hapus_int = format_kolom_hapus_int(df)
-        for kolom in kolom_hapus_int:
+        # Kolom Int
+        kolom_int = format_kolom_int(df)
+        print(f'Ini adalah kolom angka: {kolom_int}')
+        for kolom in kolom_int:
             df[kolom] = df[kolom].apply(lambda x: abs(x))
 
-        # 5. Format Nama Negara
+        # 4. Format Nama Negara
         kolom_negara = identifikasi_kolom_country(df)
         for kolom in kolom_negara:
             df[kolom] = df[kolom].apply(format_country)
         
-        # 8. Format Kategorik
+        # 5. Format Kategorik
         df = replace_values_with_dict(df, merged_dict)
 
         # Output File
