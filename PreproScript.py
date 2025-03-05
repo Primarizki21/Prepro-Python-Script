@@ -9,6 +9,8 @@ from datetime import datetime
 import time
 import os
 from spellchecker import SpellChecker
+import pkg_resources
+from symspellpy import SymSpell, Verbosity
 
 app = typer.Typer()
 
@@ -159,8 +161,6 @@ voting_mapping = {
     'y': 'Yes',
     ' ': 'Unknown',
     '': 'Unknown',
-    np.nan: 'Unknown',
-    pd.NA  : 'Unknown'
 }
 marital_mapping = {
     's': 'Single',
@@ -188,7 +188,24 @@ blood_mapping = {
     'positif': '+',
     'negatif': '-',
 }
-
+medics_mapping = {
+    "ortho": 'Orthopedics',
+    "neuro": 'Neurology',
+    "gastro": 'Gastroenterology',
+    "cardio": 'Cardiology',
+    "onco": 'Oncology',
+    "endo": 'Endocrinology',
+    "uro": 'Urology',
+    "nephro": 'Nephrology',
+    "pulmo": 'Pulmonology',
+    "derma": 'Dermatology',
+    "pedi": 'Pediatrics',
+    "psych": 'Psychiatry',
+    "radi": 'Radiology',
+    "patho": 'Pathology',
+    "anest": 'Anesthesiology',
+    "gen": 'General',
+}
 def merge_dictionaries(*dicts):
     merged_dict = {}
     for dictionary in dicts:
@@ -217,36 +234,47 @@ def format_bloodtype(blood, dictionary):
 # Format Typo
 spell = SpellChecker()
 @lru_cache(maxsize=None)
-def format_typo(typo):
-    hasil = str(spell.correction(typo))
-    if hasil.lower() == 'none':
-        return typo
+def format_typo1(typo):
+    hasil = spell.correction(typo)
+    if hasil is None:
+        return typo.title()
     return hasil.title()
 
-# def replace_values_with_dict(df, dictionary):
-#     kolom_darah = [col for col in df.columns if apakah_bloodtype(df[col])]
-#     df = df.apply(lambda x: x.str.strip().str.lower() if x.dtype == 'object' else x)
-    
-#     for kolom in df.select_dtypes(include=['object']).columns:
-#         df[kolom] = df[kolom].replace(dictionary)
-#         df[kolom] = df[kolom].apply(format_typo)
-#         if kolom in kolom_darah:
-#             df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
-#         else:
-#             df[kolom] = df[kolom].str.title()
-#     return df
+sym_spell = SymSpell(max_dictionary_edit_distance=4, prefix_length=12)
+dictionary_path = pkg_resources.resource_filename(
+    "symspellpy", "frequency_dictionary_en_82_765.txt")
+sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
+def format_typo2(typo):
+    saran_typo = sym_spell.lookup(typo, Verbosity.CLOSEST, max_edit_distance=4)
+    if saran_typo:
+        return saran_typo[0].term.title()
+    # return hasil.title()
+
+cache_kata = {}
+def combine_format_typo(typo):
+    if typo in cache_kata:
+        return cache_kata[typo]
+    typo_lower = str(typo).lower()
+    result = spell.correction(typo_lower)
+    if not result or result == typo_lower:
+        suggestions = sym_spell.lookup(typo_lower, Verbosity.CLOSEST, max_edit_distance=4)
+        if suggestions:
+            result = suggestions[0].term
+        else:
+            result = typo_lower
+    result = result.title()
+    cache_kata[typo] = result
+    return result
 
 def replace_values_with_dict(df, dictionary):
     kolom_darah = [col for col in df.columns if apakah_bloodtype(df[col])]
     
     for kolom in df.select_dtypes(include=['object']).columns:
-        print(kolom)
-        # First replace values using dictionary
+        df[kolom] = df[kolom].fillna('Unknown')
+        df[kolom] = df[kolom].apply(lambda x: str(x).lower())
         df[kolom] = df[kolom].replace(dictionary)
-        
-        # Only apply format_typo if value not in dictionary
-        df[kolom] = df[kolom].apply(lambda x: x if str(x).lower() in [str(v).lower() for v in dictionary.values()] else format_typo(x))
-        
+        print(kolom)
+        df[kolom] = df[kolom].apply(lambda x: combine_format_typo(x) if x not in dictionary and kolom not in kolom_darah else x)      
         if kolom in kolom_darah:
             df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
         else:
@@ -259,7 +287,8 @@ merged_dict = merge_dictionaries(
     marital_mapping,
     education_mapping,
     gender_mapping,
-    blood_mapping
+    blood_mapping,
+    medics_mapping
     )
 
 # Format Nama Negara
@@ -295,9 +324,9 @@ def clean(input_file: str):
     try:
         df = pd.read_csv(input_file)
 
-        # 1. Menghapus Kolom ID
-        kolom_id = identifikasi_kolom_id(df)
-        df = df.drop(columns = kolom_id)
+        # # 1. Menghapus Kolom ID
+        # kolom_id = identifikasi_kolom_id(df)
+        # df = df.drop(columns = kolom_id)
 
         # 2. Menghilangkan Duplikasi
         df = df.drop_duplicates()
@@ -323,7 +352,6 @@ def clean(input_file: str):
 
         # kolom hapus
         kolom_hapus = format_kolom_hapus(df)
-        print(kolom_hapus)
         df = df.drop(columns = kolom_hapus)
 
         # int
