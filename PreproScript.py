@@ -8,6 +8,7 @@ from functools import lru_cache
 from datetime import datetime
 import time
 import os
+from spellchecker import SpellChecker
 
 app = typer.Typer()
 
@@ -86,7 +87,8 @@ def identifikasi_kolom_date(df):
 def safe_parse(date_str):
     date_str = str(date_str).strip()
     try:
-        return parser.parse(date_str)
+        parsed_date = parser.parse(date_str)
+        return pd.to_datetime(parsed_date, errors='coerce')
     except (ValueError, TypeError): 
         return pd.NaT 
 
@@ -146,32 +148,6 @@ def format_nomor(nomor, simbol, pemisah="-"):
     hasil = pemisah.join(chunk)
     return hasil
     
-# Mencari Kolom Product
-def apakah_kolom_product(kolom):
-    pattern = r'\b(product|category|produk|kategori)|(product|category|produk|kategori)\b|_(product|category|produk|kategori)[_A-Z]?'
-    return re.search(pattern, kolom, re.IGNORECASE)
-
-def identifikasi_kolom_product(df):
-    kolom_id = []
-    for kolom in df.columns:
-        ratio = df[kolom].nunique() / len(df)
-        if apakah_kolom_product(kolom):
-            kolom_id.append(kolom)
-    return kolom_id
-
-typo_mapping = {
-    'electornics': 'electronics',
-}
-
-# Format Product
-def format_product(produk):
-    produk = str(produk).lower()
-    if produk in ['na','nan']:
-        produk = 'Unknown'
-    if produk in typo_mapping:
-        produk = typo_mapping[produk]
-    return produk.title()
-
 # Kategorik
 country_mapping = {
     'america': 'USA',
@@ -183,7 +159,8 @@ voting_mapping = {
     'y': 'Yes',
     ' ': 'Unknown',
     '': 'Unknown',
-    np.nan: 'Unknown'
+    np.nan: 'Unknown',
+    pd.NA  : 'Unknown'
 }
 marital_mapping = {
     's': 'Single',
@@ -211,6 +188,7 @@ blood_mapping = {
     'positif': '+',
     'negatif': '-',
 }
+
 def merge_dictionaries(*dicts):
     merged_dict = {}
     for dictionary in dicts:
@@ -218,14 +196,15 @@ def merge_dictionaries(*dicts):
     return merged_dict
 
 def apakah_bloodtype(kolom):
+    kolom = kolom.astype(str)
     akhiran = kolom.str.endswith('+') | kolom.str.endswith('-')
     ada_kata = kolom.str.contains('positive|negative|positif|negatif', case=False, na=False)
     return akhiran.any() | ada_kata.any()
 
 def format_bloodtype(blood, dictionary):
     output = blood
-    blood = blood.lower()
-    bagian = blood.split()
+    bloods = blood.lower()
+    bagian = bloods.split()
     if len(bagian) == 2 and (bagian[0] in ['a', 'b', 'ab', 'o'] and bagian[1] in dictionary):
         darah, tipe = bagian
         tipe = dictionary.get(tipe.lower(), tipe)
@@ -235,11 +214,40 @@ def format_bloodtype(blood, dictionary):
     else:
         return output
 
+# Format Typo
+spell = SpellChecker()
+@lru_cache(maxsize=None)
+def format_typo(typo):
+    hasil = str(spell.correction(typo))
+    if hasil.lower() == 'none':
+        return typo
+    return hasil.title()
+
+# def replace_values_with_dict(df, dictionary):
+#     kolom_darah = [col for col in df.columns if apakah_bloodtype(df[col])]
+#     df = df.apply(lambda x: x.str.strip().str.lower() if x.dtype == 'object' else x)
+    
+#     for kolom in df.select_dtypes(include=['object']).columns:
+#         df[kolom] = df[kolom].replace(dictionary)
+#         df[kolom] = df[kolom].apply(format_typo)
+#         if kolom in kolom_darah:
+#             df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
+#         else:
+#             df[kolom] = df[kolom].str.title()
+#     return df
+
 def replace_values_with_dict(df, dictionary):
+    kolom_darah = [col for col in df.columns if apakah_bloodtype(df[col])]
+    
     for kolom in df.select_dtypes(include=['object']).columns:
-        df[kolom] = df[kolom].str.strip().str.lower()
+        print(kolom)
+        # First replace values using dictionary
         df[kolom] = df[kolom].replace(dictionary)
-        if apakah_bloodtype(df[kolom]):
+        
+        # Only apply format_typo if value not in dictionary
+        df[kolom] = df[kolom].apply(lambda x: x if str(x).lower() in [str(v).lower() for v in dictionary.values()] else format_typo(x))
+        
+        if kolom in kolom_darah:
             df[kolom] = df[kolom].apply(lambda x: format_bloodtype(x, blood_mapping))
         else:
             df[kolom] = df[kolom].str.title()
@@ -255,7 +263,6 @@ merged_dict = merge_dictionaries(
     )
 
 # Format Nama Negara
-@lru_cache(maxsize=None)
 def format_country(country):
     """
     Format country menjadi nama negara, bukan code atau nomor
@@ -265,6 +272,22 @@ def format_country(country):
         country = country_mapping[country]
     hasil_cari = pycountry.countries.search_fuzzy(country)[0]
     return hasil_cari.name
+
+# Kolom Hapus
+def format_kolom_hapus(df, threshold = 0.6):
+    kolom_id = []
+    for kolom in df.select_dtypes(include=['object']).columns:
+        ratio = df[kolom].nunique() / len(df)
+        jumlah = df[kolom].nunique()
+        if ratio >= threshold or jumlah > 100:
+            kolom_id.append(kolom)
+    return kolom_id
+
+def format_kolom_hapus_int(df):
+    kolom_id = []
+    for kolom in df.select_dtypes(include=['int', 'float']).columns:
+        kolom_id.append(kolom)
+    return kolom_id
 
 # Main Function
 @app.command()
@@ -278,11 +301,6 @@ def clean(input_file: str):
 
         # 2. Menghilangkan Duplikasi
         df = df.drop_duplicates()
-
-        # 3. Format Nama
-        kolom_nama = identifikasi_kolom_nama(df)
-        for kolom in kolom_nama:
-            df[kolom] = df[kolom].apply(format_nama)
         
         # 4. Format Tanggal
         kolom_date = identifikasi_kolom_date(df)
@@ -303,22 +321,21 @@ def clean(input_file: str):
             else:
                 print(f"Kolom {kolom} sudah dalam format datetime64[ns]")
 
+        # kolom hapus
+        kolom_hapus = format_kolom_hapus(df)
+        print(kolom_hapus)
+        df = df.drop(columns = kolom_hapus)
+
+        # int
+        kolom_hapus_int = format_kolom_hapus_int(df)
+        for kolom in kolom_hapus_int:
+            df[kolom] = df[kolom].apply(lambda x: abs(x))
+
         # 5. Format Nama Negara
         kolom_negara = identifikasi_kolom_country(df)
         for kolom in kolom_negara:
             df[kolom] = df[kolom].apply(format_country)
         
-        # 6. Format Nomor Telepon
-        kolom_telp = identifikasi_kolom_telp(df)
-        for kolom in kolom_telp:
-            simbol = ekstrak_simbol(df[kolom])
-            df[kolom] = df[kolom].apply(lambda x: format_nomor(x, simbol))
-
-        # 7. Format Product
-        kolom_product = identifikasi_kolom_product(df)
-        for kolom in kolom_product:
-            df[kolom] = df[kolom].apply(format_product)
-
         # 8. Format Kategorik
         df = replace_values_with_dict(df, merged_dict)
 
